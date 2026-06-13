@@ -7,12 +7,7 @@ def get_client():
 
 
 def clean_ai_output(text):
-    text = re.sub(
-    r"<tool_call>.*?</tool_call>",
-    "",
-    text,
-    flags=re.DOTALL
-)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     return text.strip()
 
 
@@ -23,7 +18,7 @@ def get_hint(challenge, test, got, code):
 You are a coding tutor. Reply back to the user.
 
 IMPORTANT:
-- Give only a short indirect hint.
+- Give only a veryshort indirect hint.
 - Do not provide the full solution.
 - Try to give indirect hints
 - Do not include reasoning tags.
