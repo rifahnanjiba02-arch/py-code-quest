@@ -1,88 +1,71 @@
-import os
-from dotenv import load_dotenv
-from groq import Groq
+from services.groq_service import get_hint
 import streamlit as st
 import json
-import re
 
-load_dotenv(".env.local")
-
-client =Groq(api_key=os.getenv("GROQ_API_KEY"))
-
-def clean_ai_output(text):
-    # remove <think>...</think>
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    return text.strip()
-
-def get_hint(challenge,test,got,code):
-    prompt = f"""
-You are a coding tutor. Reply back to the user.
-
-IMPORTANT:
-Do NOT include <think>, reasoning tags, or explanations of your thinking.
-
-Only give a short hint.
-
-Problem:
-{challenge['description']}
-
-Student Code:
-{code}
-
-Failed Test:
-Input: {test.get('input')}
-Expected: {test.get('expected')}
-Got: {got}
-
-Give only a short hint.
-"""
-    response= client.chat.completions.create(
-        model="qwen/qwen3-32b",
-        messages=[{"role":"user", "content": prompt}]
-    )
-    return clean_ai_output(response.choices[0].message.content)
-
+#setup
 st.set_page_config(page_title="PyCodeQuest", page_icon="🐍")
 st.title("PyCodeQuest")
 st.write("Solve the challenge by writing a Python function.")
 
+#load data
 with open("data/challenges.json","r") as f:
     challenges = json.load(f)
 
-challenge = challenges[0]
+#state
+if "current_level" not in st.session_state:
+    st.session_state.current_level=1
 
+if "level_passed" not in st.session_state:
+    st.session_state.level_passed =False
+
+if "results" not in st.session_state:
+    st.session_state.results = []
+
+#get current challenge
+challenge = challenges[
+    st.session_state.current_level - 1
+]
+
+#header
+st.markdown(f"Level {challenge['id']}")
 st.subheader(challenge["title"])
+st.caption(f"{challenge['topic']}|{challenge['difficulty']}")
+
+progress = min(
+    st.session_state.current_level,
+    len(challenges)
+)/ len(challenges)
+st.progress(progress)
+
 st.write(challenge["description"])
 
 st.markdown("---")
-code = st.text_area("Your Solution", height=200, placeholder="Write your Python function here...")
 
-if st.button("Submit"):
+#code input
+code = st.text_area(
+     "Your Solution",
+     height=200,
+     placeholder="Write your Python function here...",
+     key= f"code_level_{st.session_state.current_level}"
+     )
+
+#submit logic
+def run_tests(user_code, challenge):
+    namespace= {}
     try:
-        namespace={} #create safe namespace    
-        try:
-            exec(code,namespace) #run user code
-        except Exception as e:
-            st.error(f"Code Error: {str(e)}")
-            st.stop
+        exec(code,namespace) #run user code
+    except Exception as e:
+        return False, [{"error": str(e)}]
 
-        #get function name from challenge
-        func = namespace.get(challenge["function_name"]) 
+    #get function name from challenge
+    func = namespace.get(challenge["function_name"]) 
+    if func is None:
+            return False, [{"error": "Function not found"}]
+    
+    results=[]
+    all_passed= True
 
-        #check if functions exists
-        if func is None:
-            st.error(f"Function '{challenge['function_name']}' not found!")
-        else:
-            #run tests
-            st.markdown("---")
-            st.subheader("Running Tests...")
-
-            results= []
-            all_passed= True
-
-            hint_shown = False
-
-            for i, test in enumerate(challenge["tests"], start=1):
+    for i, test in enumerate(challenge["tests"], start=1):
                 try:
                     result= func(*test["input"])
                     expected= test["expected"]
@@ -97,17 +80,6 @@ if st.button("Submit"):
                     })
                     if not passed:
                         all_passed= False
-                        if not hint_shown:
-                            hint_shown= True
-                            st.info("AI HINT")
-
-                            hint=get_hint(
-                                challenge,
-                                test,
-                                result,
-                                code
-                            )
-                            st.write(hint)
 
                 except Exception as e:
                     results.append({
@@ -118,38 +90,64 @@ if st.button("Submit"):
                     })
 
                     all_passed= False
-
-            #ui display
-            st.subheader("Test Results")
-            if all_passed:
-                st.balloons()
-                st.success("All tests passed")
-            else:
-                st.error("Some tests failed")
-
-            with st.expander("View Test Details"):
-                
-                for r in results:
-                    if r["passed"]:
-                        st.success(f"Test {r['test']} passed!")
-                        continue
-                    st.error(f"Test {r['test']} failed")
-                    st.write("Input", r["input"])
-
-                    if "error" in r:
-                        st.write("Error", r["error"])
-                    else:
-                        st.write("Expected:",r["expected"])
-                        st.write("Got", r["got"])
-
-            st.markdown("---")
-
-            
-                
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
     
+    return all_passed, results
 
-   
+#submit button
+if st.button("Submit"):
+    all_passed, results= run_tests(code, challenge)
+    st.session_state.results= results
 
-         
+    if all_passed:
+        st.session_state.level_passed= True
+        st.balloons()
+        st.success("Level Complete!")
+    else:
+        st.session_state.level_passed= False
+        st.error("Some tests failed!")
+
+        #show hint only once
+        failed_test = next((r for r in results if not r.get("passed", True)), None)
+
+        if failed_test and "error" not in failed_test:
+            hint= get_hint(challenge,
+                           {
+                               "input": failed_test["input"],
+                               "expected": failed_test["expected"]
+                           },
+                           failed_test["got"],
+                           code
+                           )
+            st.info("AI Hint")
+            st.write(hint)
+
+#next level 
+if st.session_state.level_passed:
+        if challenge["id"] < len(challenges):
+            if st.button("Next Level"):
+                st.session_state.current_level += 1
+                st.session_state.level_passed = False
+                st.session_state.results= []
+                st.rerun()
+
+        else:
+             st.success("You completed all levels!")
+
+#test results
+if st.session_state.results:
+        st.markdown("---")
+        st.subheader("Test Results")
+
+        for r in st.session_state.results:
+            if r.get("passed"):
+                st.success(f"Test {r['test']} passed!")
+
+            elif "error" in r:
+                 st.error(f"Error: {r['error']}")
+            else:
+                 st.error(f"Test {r['test']} failed")
+                 st.write("Expected:",r["expected"])
+                 st.write("Got:",r["got"])
+                  
+
+       
