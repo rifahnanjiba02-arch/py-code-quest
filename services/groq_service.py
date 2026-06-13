@@ -1,28 +1,23 @@
-import os
 import re
-
-from dotenv import load_dotenv
+from config import get_api_key
 from groq import Groq
 
-load_dotenv(".env.local")
-
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
-)
+def get_client():
+    return Groq(api_key=get_api_key())
 
 
 def clean_ai_output(text):
     text = re.sub(
-        r"<think>.*?</think>",
-        "",
-        text,
-        flags=re.DOTALL
-    )
-
+    r"<tool_call>.*?</tool_call>",
+    "",
+    text,
+    flags=re.DOTALL
+)
     return text.strip()
 
 
 def get_hint(challenge, test, got, code):
+    client= get_client()
 
     prompt = f"""
 You are a coding tutor. Reply back to the user.
