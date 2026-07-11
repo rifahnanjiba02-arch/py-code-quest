@@ -43,7 +43,7 @@ Got: {got}
 """
 
     response = client.chat.completions.create(
-        model="qwen/qwen3-32b",
+        model="llama-3.1-8b-instant",
         messages=[
             {
                 "role": "system",
